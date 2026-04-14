@@ -26,6 +26,7 @@ VERTICAL_MARGIN_SPACES = 1.5
 TOTAL_LED_COUNT = RIGHT_COUNT + TOP_COUNT + LEFT_COUNT + BOTTOM_COUNT
 SERIAL_BITS_PER_BYTE = 10.0
 DEFAULT_WIRE_UTILIZATION = 0.85
+DEFAULT_KEEPALIVE_SECONDS = 0.5
 
 
 @dataclass(frozen=True)
@@ -231,6 +232,7 @@ def sync_loop(
     monitor = resolve_monitor(sct, display)
     pixel_rects = build_pixel_rects(monitor["width"], monitor["height"])
     last_quantized: np.ndarray | None = None
+    last_sent_at = 0.0
 
     try:
         if modem_pulse:
@@ -254,13 +256,19 @@ def sync_loop(
                 capture_elapsed = time.monotonic() - capture_started
                 quantized = quantize_colors(colors)
                 changed = last_quantized is None or not np.array_equal(quantized, last_quantized)
+                keepalive_due = (
+                    last_quantized is not None
+                    and not changed
+                    and (time.monotonic() - last_sent_at) >= DEFAULT_KEEPALIVE_SECONDS
+                )
                 write_elapsed = 0.0
-                if changed:
+                if changed or keepalive_due:
                     frame = make_color_frame_from_quantized(quantized)
                     write_started = time.monotonic()
                     write_all(fd, frame)
                     write_elapsed = time.monotonic() - write_started
                     last_quantized = quantized.copy()
+                    last_sent_at = time.monotonic()
                     sent_frames += 1
                     stats_sent += 1
                 else:
