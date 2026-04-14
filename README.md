@@ -1,8 +1,13 @@
 # SkyDimo Probe
 
-Minimal probe for a SkyDimo serial light on macOS.
+Minimal Python tools for a SkyDimo serial light on macOS.
 
-No third-party dependency is required. The script uses Python's `termios` APIs.
+`probe_skydimo.py` uses only the Python standard library.
+`screen_sync.py` requires `mss` for screen capture:
+
+```bash
+python3 -m pip install --user mss
+```
 
 Examples:
 
@@ -19,6 +24,7 @@ python3 probe_skydimo.py --port /dev/cu.usbserial-110 --led-count 114 --solid FF
 python3 probe_skydimo.py --port /dev/cu.usbserial-110 --led-count 114 --solid 000000
 python3 screen_sync.py --port /dev/cu.usbserial-110
 python3 screen_sync.py --port /dev/cu.usbserial-110 --stats-interval 2
+python3 screen_sync.py --port /dev/cu.usbserial-110 --display 2
 ```
 
 Current assumptions from the official app logs:
@@ -42,3 +48,18 @@ Sampling model used by `screen_sync.py`:
 - left and right: `20` bins each
 - horizontal dead space: `2` LED spacings on both sides
 - vertical dead space: `1.5` LED spacings on both sides
+
+Current `screen_sync.py` defaults:
+
+- backend: `mss`
+- fps: `40`
+- idle-fps: `0` (disabled)
+- brightness: `0.10`
+- display: `1`
+- wire-utilization: `0.85`
+
+Notes:
+
+- `display=1` means the first physical display reported by `mss`
+- this controller works reliably at `115200` baud
+- the current best-performing path is full-display capture plus full-frame serial updates
