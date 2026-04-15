@@ -135,6 +135,14 @@ def build_pixel_rects(width: int, height: int) -> list[PixelRect]:
     ]
 
 
+def srgb_to_linear(srgb: np.ndarray, gamma: float = 2.2) -> np.ndarray:
+    """Convert sRGB to linear RGB (gamma correction)"""
+    normalized = srgb / 255.0
+    # Simplified gamma correction (pure power law)
+    linear = np.power(normalized, gamma)
+    return linear * 255.0
+
+
 def sample_edge_colors_from_bgra(
     bgra: np.ndarray,
     pixel_rects: list[PixelRect],
@@ -147,9 +155,11 @@ def sample_edge_colors_from_bgra(
             colors[index] = 0.0
             continue
         mean = region.mean(axis=(0, 1), dtype=np.float32)
-        colors[index, 0] = mean[2] * brightness
-        colors[index, 1] = mean[1] * brightness
-        colors[index, 2] = mean[0] * brightness
+        # Apply gamma correction: sRGB to linear
+        linear_bgr = srgb_to_linear(mean[:3])
+        colors[index, 0] = linear_bgr[2] * brightness
+        colors[index, 1] = linear_bgr[1] * brightness
+        colors[index, 2] = linear_bgr[0] * brightness
     return np.clip(colors, 0.0, 255.0)
 
 
