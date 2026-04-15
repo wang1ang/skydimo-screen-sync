@@ -112,7 +112,7 @@ enum Constants {
     static let defaultBaud: Int32 = 115_200
     static let defaultPort = "/dev/cu.usbserial-110"
     static let defaultFPS = 30.0
-    static let defaultBrightness = 0.10
+    static let defaultBrightness = 0.30
     static let defaultDisplay = 1
     static let defaultCaptureScale = 0.0625
     static let horizontalMarginSpaces = 2.0
@@ -192,10 +192,10 @@ struct Usage {
       SkydimoAgent displays
       SkydimoAgent solid --port /dev/cu.usbserial-110 --hex FFAA00 [--duration 5] [--fps 10] [--baud 115200]
       SkydimoAgent off --port /dev/cu.usbserial-110 [--baud 115200]
-      SkydimoAgent sync --port /dev/cu.usbserial-110 [--display 1] [--fps 40] [--brightness 0.10] [--capture-scale 0.125] [--duration 0] [--stats-interval 0]
+      SkydimoAgent sync --port /dev/cu.usbserial-110 [--display 1] [--fps 30] [--brightness 0.30] [--capture-scale 0.0625] [--duration 0] [--stats-interval 0]
 
     Notes:
       - Uses ScreenCaptureKit (macOS 12.3+) for low-latency screen capture
-      - Typical latency: 100-200ms glass-to-glass
+      - Typical latency: <200ms glass-to-glass
     """
 }

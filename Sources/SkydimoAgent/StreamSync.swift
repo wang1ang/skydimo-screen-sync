@@ -32,7 +32,6 @@ struct DisplayDescriptor: Encodable, Sendable {
 private struct PendingFrame: Sendable {
     let colors: [RGB]
     let timing: FrameTimingMetadata
-    let shouldSend: Bool
 }
 
 final class FrameWriter: @unchecked Sendable {
@@ -54,7 +53,7 @@ final class FrameWriter: @unchecked Sendable {
 
     func offer(colors: [RGB], timing: FrameTimingMetadata) {
         let shouldStart = lock.withLock { () -> Bool in
-            latestFrame = PendingFrame(colors: colors, timing: timing, shouldSend: true)
+            latestFrame = PendingFrame(colors: colors, timing: timing)
             return sendTask == nil
         }
         if shouldStart {
@@ -77,6 +76,7 @@ final class FrameWriter: @unchecked Sendable {
     }
 
     private func drainLoop() async {
+        var consecutiveNilCount = 0
         while true {
             let pendingFrame: PendingFrame? = {
                 lock.withLock { () -> PendingFrame? in
@@ -87,11 +87,19 @@ final class FrameWriter: @unchecked Sendable {
             }()
 
             guard let pendingFrame else {
+                consecutiveNilCount += 1
+                // Wait a bit before giving up, in case frames are just delayed
+                if consecutiveNilCount < 10 {
+                    try? await Task.sleep(nanoseconds: 5_000_000) // 5ms
+                    continue
+                }
                 lock.withLock {
                     sendTask = nil
                 }
                 return
             }
+
+            consecutiveNilCount = 0
 
             let frame = AdalightFrameEncoder.frame(colors: pendingFrame.colors)
             do {
@@ -240,16 +248,6 @@ final class StreamSyncSession: NSObject, SCStreamOutput, SCStreamDelegate, SyncS
         configuration.showsCursor = false
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, Int32(options.fps.rounded()))))
         configuration.captureResolution = .best
-        configuration.backgroundColor = .clear
-        configuration.ignoreShadowsDisplay = true
-
-        // Try to prevent SCStream from throttling on static content
-        if #available(macOS 14.0, *) {
-            configuration.ignoreShadowsSingleWindow = true
-        }
-        if #available(macOS 14.2, *) {
-            configuration.includeChildWindows = false
-        }
 
         let stream = SCStream(filter: context.filter, configuration: configuration, delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)

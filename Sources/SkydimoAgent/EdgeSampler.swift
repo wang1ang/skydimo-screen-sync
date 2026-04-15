@@ -9,6 +9,12 @@ struct EdgeSampler: Sendable {
         self.pixelRects = Self.buildPixelRects(width: width, height: height)
     }
 
+    private func srgbToLinear(_ srgb: Double) -> Double {
+        let normalized = srgb / 255.0
+        let linear = pow(normalized, 2.2)
+        return linear * 255.0
+    }
+
     func sample(pixelBuffer: CVPixelBuffer, brightness: Double) -> [RGB] {
         CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
@@ -60,10 +66,19 @@ struct EdgeSampler: Sendable {
             guard count > 0 else { return .off }
 
             let divisor = Double(count)
+            let avgRed = redTotal / divisor
+            let avgGreen = greenTotal / divisor
+            let avgBlue = blueTotal / divisor
+
+            // Apply gamma correction: sRGB to linear
+            let linearRed = srgbToLinear(avgRed)
+            let linearGreen = srgbToLinear(avgGreen)
+            let linearBlue = srgbToLinear(avgBlue)
+
             return RGB(
-                red: UInt8(clamping: Int((redTotal / divisor * scale).rounded())),
-                green: UInt8(clamping: Int((greenTotal / divisor * scale).rounded())),
-                blue: UInt8(clamping: Int((blueTotal / divisor * scale).rounded()))
+                red: UInt8(clamping: Int((linearRed * scale).rounded())),
+                green: UInt8(clamping: Int((linearGreen * scale).rounded())),
+                blue: UInt8(clamping: Int((linearBlue * scale).rounded()))
             )
         }
     }
