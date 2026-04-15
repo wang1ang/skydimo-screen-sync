@@ -111,7 +111,7 @@ enum Constants {
     static let ledCount = 114
     static let defaultBaud: Int32 = 115_200
     static let defaultPort = "/dev/cu.usbserial-110"
-    static let defaultFPS = 60.0
+    static let defaultFPS = 30.0
     static let defaultBrightness = 0.10
     static let defaultDisplay = 1
     static let defaultCaptureScale = 0.0625

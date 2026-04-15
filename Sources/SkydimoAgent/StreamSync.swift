@@ -32,6 +32,7 @@ struct DisplayDescriptor: Encodable, Sendable {
 private struct PendingFrame: Sendable {
     let colors: [RGB]
     let timing: FrameTimingMetadata
+    let shouldSend: Bool
 }
 
 final class FrameWriter: @unchecked Sendable {
@@ -53,7 +54,7 @@ final class FrameWriter: @unchecked Sendable {
 
     func offer(colors: [RGB], timing: FrameTimingMetadata) {
         let shouldStart = lock.withLock { () -> Bool in
-            latestFrame = PendingFrame(colors: colors, timing: timing)
+            latestFrame = PendingFrame(colors: colors, timing: timing, shouldSend: true)
             return sendTask == nil
         }
         if shouldStart {
@@ -235,14 +236,19 @@ final class StreamSyncSession: NSObject, SCStreamOutput, SCStreamDelegate, SyncS
         configuration.width = scaledWidth
         configuration.height = scaledHeight
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
-        configuration.queueDepth = 2
+        configuration.queueDepth = 3
         configuration.showsCursor = false
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, Int32(options.fps.rounded()))))
-        configuration.captureResolution = .nominal
+        configuration.captureResolution = .best
+        configuration.backgroundColor = .clear
+        configuration.ignoreShadowsDisplay = true
 
         // Try to prevent SCStream from throttling on static content
         if #available(macOS 14.0, *) {
-            configuration.ignoreShadowsSingleWindow = false
+            configuration.ignoreShadowsSingleWindow = true
+        }
+        if #available(macOS 14.2, *) {
+            configuration.includeChildWindows = false
         }
 
         let stream = SCStream(filter: context.filter, configuration: configuration, delegate: self)

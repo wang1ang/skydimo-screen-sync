@@ -27,6 +27,25 @@ python3 screen_sync.py --port /dev/cu.usbserial-110 --stats-interval 2
 python3 screen_sync.py --port /dev/cu.usbserial-110 --display 2
 ```
 
+Swift agent scaffold:
+
+```bash
+swift build
+./.build/debug/SkydimoAgent version
+./.build/debug/SkydimoAgent describe
+./.build/debug/SkydimoAgent displays
+./.build/debug/SkydimoAgent solid --port /dev/cu.usbserial-110 --hex 0A0500 --duration 5 --fps 10
+./.build/debug/SkydimoAgent off --port /dev/cu.usbserial-110
+./.build/debug/SkydimoAgent sync --port /dev/cu.usbserial-110
+```
+
+Screen sync uses ScreenCaptureKit for low-latency capture:
+- Latency: ~100-200ms glass-to-glass
+- Frame rate: 28-38 fps
+- CPU usage: ~2% (optimized with frame deduplication)
+- Default capture: 240x135 (1/16th resolution, sufficient for edge sampling)
+- Requires: macOS 12.3+
+
 Current assumptions from the official app logs:
 
 - device model: `SK0L32`
@@ -63,3 +82,5 @@ Notes:
 - `display=1` means the first physical display reported by `mss`
 - this controller works reliably at `115200` baud
 - the current best-performing path is full-display capture plus full-frame serial updates
+- the first Swift package currently migrates serial transport, protocol framing, and the confirmed LED mapping
+- the Swift package currently targets `macOS 14+`
