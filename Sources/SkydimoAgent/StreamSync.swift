@@ -200,9 +200,13 @@ final class ScreenCaptureSupport {
 final class StreamSyncSession: NSObject, SCStreamOutput, SCStreamDelegate, SyncSession, @unchecked Sendable {
     private let writer: FrameWriter
     private let options: SyncOptions
-    private let sampler: EdgeSampler
+    private var sampler: EdgeSampler
+    private let initialWidth: Int
+    private let initialHeight: Int
     private let queue = DispatchQueue(label: "SkydimoAgent.SCStream", qos: .userInteractive)
     private var didLogFirstFrame = false
+    private var letterboxDetectCount = 0
+    private var currentCropRect: CropRect = .none
     private var statsLast = ContinuousClock.now
     private var statsFrames = 0
     private var statsCompleteFrames = 0
@@ -232,6 +236,8 @@ final class StreamSyncSession: NSObject, SCStreamOutput, SCStreamDelegate, SyncS
     init(writer: FrameWriter, options: SyncOptions, width: Int, height: Int) {
         self.writer = writer
         self.options = options
+        self.initialWidth = width
+        self.initialHeight = height
         self.sampler = EdgeSampler(width: width, height: height)
     }
 
@@ -281,6 +287,24 @@ final class StreamSyncSession: NSObject, SCStreamOutput, SCStreamDelegate, SyncS
         default:
             return
         }
+
+        // Periodically detect letterbox and update sampler if needed
+        letterboxDetectCount += 1
+        if letterboxDetectCount % 90 == 0 { // Check every ~3 seconds at 30fps
+            if let detected = EdgeSampler.detectLetterbox(pixelBuffer: pixelBuffer) {
+                if abs(detected.top - currentCropRect.top) > 0.01 || abs(detected.bottom - currentCropRect.bottom) > 0.01 {
+                    currentCropRect = detected
+                    sampler = EdgeSampler(width: initialWidth, height: initialHeight, cropRect: detected)
+                    fputs("sync: letterbox detected top=\(String(format: "%.3f", detected.top)) bottom=\(String(format: "%.3f", detected.bottom))\n", stderr)
+                }
+            } else if currentCropRect.top > 0.01 || currentCropRect.bottom < 0.99 {
+                // Reset to no crop if letterbox disappeared
+                currentCropRect = .none
+                sampler = EdgeSampler(width: initialWidth, height: initialHeight)
+                fputs("sync: letterbox cleared\n", stderr)
+            }
+        }
+
         let callbackReceivedAt = ContinuousClock.now
         let colors = sampler.sample(pixelBuffer: pixelBuffer, brightness: options.brightness)
         let sampledAt = ContinuousClock.now

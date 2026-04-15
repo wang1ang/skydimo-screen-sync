@@ -2,11 +2,26 @@ import CoreVideo
 import CoreGraphics
 import Foundation
 
+struct CropRect: Sendable {
+    let top: Double
+    let bottom: Double
+    let left: Double
+    let right: Double
+
+    static let none = CropRect(top: 0.0, bottom: 1.0, left: 0.0, right: 1.0)
+
+    var isValid: Bool {
+        return bottom > top && right > left && top >= 0.0 && bottom <= 1.0 && left >= 0.0 && right <= 1.0
+    }
+}
+
 struct EdgeSampler: Sendable {
     let pixelRects: [PixelRect]
+    let cropRect: CropRect
 
-    init(width: Int, height: Int) {
-        self.pixelRects = Self.buildPixelRects(width: width, height: height)
+    init(width: Int, height: Int, cropRect: CropRect = .none) {
+        self.cropRect = cropRect
+        self.pixelRects = Self.buildPixelRects(width: width, height: height, cropRect: cropRect)
     }
 
     private func srgbToLinear(_ srgb: Double) -> Double {
@@ -28,6 +43,71 @@ struct EdgeSampler: Sendable {
         let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
         let bytes = baseAddress.assumingMemoryBound(to: UInt8.self)
         return sampleBGRA(bytes: bytes, width: width, height: height, bytesPerRow: bytesPerRow, brightness: brightness)
+    }
+
+    static func detectLetterbox(pixelBuffer: CVPixelBuffer, threshold: Int = 20) -> CropRect? {
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+
+        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else {
+            return nil
+        }
+
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        let bytes = baseAddress.assumingMemoryBound(to: UInt8.self)
+
+        // Detect top black bar
+        var topBorder = 0
+        for y in 0..<(height / 3) {
+            var blackPixels = 0
+            let row = bytes.advanced(by: y * bytesPerRow)
+            for x in stride(from: 0, to: width, by: 4) {
+                let pixel = row.advanced(by: x * 4)
+                let brightness = (Int(pixel[0]) + Int(pixel[1]) + Int(pixel[2])) / 3
+                if brightness < threshold {
+                    blackPixels += 1
+                }
+            }
+            if blackPixels > width / 8 {
+                topBorder = y
+            } else {
+                break
+            }
+        }
+
+        // Detect bottom black bar
+        var bottomBorder = height
+        for y in stride(from: height - 1, to: height * 2 / 3, by: -1) {
+            var blackPixels = 0
+            let row = bytes.advanced(by: y * bytesPerRow)
+            for x in stride(from: 0, to: width, by: 4) {
+                let pixel = row.advanced(by: x * 4)
+                let brightness = (Int(pixel[0]) + Int(pixel[1]) + Int(pixel[2])) / 3
+                if brightness < threshold {
+                    blackPixels += 1
+                }
+            }
+            if blackPixels > width / 8 {
+                bottomBorder = y + 1
+            } else {
+                break
+            }
+        }
+
+        // Only return crop rect if significant bars detected
+        let barHeight = topBorder + (height - bottomBorder)
+        if barHeight > height / 10 {
+            return CropRect(
+                top: Double(topBorder) / Double(height),
+                bottom: Double(bottomBorder) / Double(height),
+                left: 0.0,
+                right: 1.0
+            )
+        }
+
+        return nil
     }
 
     func sampleBGRA(bytes: UnsafePointer<UInt8>, width: Int, height: Int, bytesPerRow: Int, brightness: Double) -> [RGB] {
@@ -83,8 +163,8 @@ struct EdgeSampler: Sendable {
         }
     }
 
-    private static func buildPixelRects(width: Int, height: Int) -> [PixelRect] {
-        edgeLayout().map { rect in
+    private static func buildPixelRects(width: Int, height: Int, cropRect: CropRect) -> [PixelRect] {
+        edgeLayout(cropRect: cropRect).map { rect in
             let x0 = max(0, min(width - 1, Int(rect.x0 * Double(width))))
             let y0 = max(0, min(height - 1, Int(rect.y0 * Double(height))))
             let x1 = max(x0 + 1, min(width, Int(rect.x1 * Double(width))))
@@ -93,27 +173,45 @@ struct EdgeSampler: Sendable {
         }
     }
 
-    private static func edgeLayout() -> [SampleRect] {
+    private static func edgeLayout(cropRect: CropRect) -> [SampleRect] {
         let xCenters = computeCenters(count: Constants.topCount, marginSpaces: Constants.horizontalMarginSpaces)
         let yCenters = computeCenters(count: Constants.leftCount, marginSpaces: Constants.verticalMarginSpaces)
         let xBounds = computeBounds(centers: xCenters)
         let yBounds = computeBounds(centers: yCenters)
-        let topBand = yBounds[0]
-        let bottomBand = yBounds[yBounds.count - 1]
-        let leftBand = xBounds[0]
-        let rightBand = xBounds[xBounds.count - 1]
+
+        // Apply crop rect to the bounds
+        let cropTop = cropRect.top
+        let cropBottom = cropRect.bottom
+        let cropLeft = cropRect.left
+        let cropRight = cropRect.right
+
+        let verticalRange = cropBottom - cropTop
+        let horizontalRange = cropRight - cropLeft
+
+        let topBand = cropTop + yBounds[0] * verticalRange
+        let bottomBand = cropTop + yBounds[yBounds.count - 1] * verticalRange
+        let leftBand = cropLeft + xBounds[0] * horizontalRange
+        let rightBand = cropLeft + xBounds[xBounds.count - 1] * horizontalRange
 
         let top = stride(from: Constants.topCount - 1, through: 0, by: -1).map {
-            SampleRect(x0: xBounds[$0], y0: 0.0, x1: xBounds[$0 + 1], y1: topBand)
+            let x0 = cropLeft + xBounds[$0] * horizontalRange
+            let x1 = cropLeft + xBounds[$0 + 1] * horizontalRange
+            return SampleRect(x0: x0, y0: cropTop, x1: x1, y1: topBand)
         }
         let bottom = (0 ..< Constants.bottomCount).map {
-            SampleRect(x0: xBounds[$0], y0: bottomBand, x1: xBounds[$0 + 1], y1: 1.0)
+            let x0 = cropLeft + xBounds[$0] * horizontalRange
+            let x1 = cropLeft + xBounds[$0 + 1] * horizontalRange
+            return SampleRect(x0: x0, y0: bottomBand, x1: x1, y1: cropBottom)
         }
         let left = (0 ..< Constants.leftCount).map {
-            SampleRect(x0: 0.0, y0: yBounds[$0], x1: leftBand, y1: yBounds[$0 + 1])
+            let y0 = cropTop + yBounds[$0] * verticalRange
+            let y1 = cropTop + yBounds[$0 + 1] * verticalRange
+            return SampleRect(x0: cropLeft, y0: y0, x1: leftBand, y1: y1)
         }
         let right = stride(from: Constants.rightCount - 1, through: 0, by: -1).map {
-            SampleRect(x0: rightBand, y0: yBounds[$0], x1: 1.0, y1: yBounds[$0 + 1])
+            let y0 = cropTop + yBounds[$0] * verticalRange
+            let y1 = cropTop + yBounds[$0 + 1] * verticalRange
+            return SampleRect(x0: rightBand, y0: y0, x1: cropRight, y1: y1)
         }
 
         return right + top + left + bottom
